@@ -1,3 +1,9 @@
+# Settings
+*.settings
+
+# Credentials
+credentials.yml
+
 # Logs
 logs
 *.log
@@ -39,6 +45,9 @@ _testmain.go
 /target/
 *.class
 *.jar
+
+*.classpath
+*.project
 
 # Mobile Tools for Java (J2ME)
 .mtj.tmp/

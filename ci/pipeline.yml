@@ -1,0 +1,311 @@
+---
+groups:
+- name: shipping-jobs
+  jobs:
+  - build-shipping
+  - deploy-shipping-to-stage
+  - health-check
+  - deploy-shipping-to-prod
+  - execute-shipping-load-tests
+  - validate-shipping-load-test
+  - promote-new-version-shipping
+
+- name: init-dynatrace
+  jobs: 
+  - init-dynatrace-shipping
+
+resource_types:
+- name: dynatrace-resource
+  type: docker-image
+  source:
+    repository: mvilliger/dynatrace-resource
+
+resources:
+
+- name: git-pipeline
+  type: git
+  source:
+    branch: master
+    uri: https://github.com/dynatrace-sockshop/sockshop.git
+
+- name: git-jmeter-as-container
+  type: git
+  source:
+    branch: master
+    uri: https://github.com/dynatrace-sockshop/jmeter-as-container.git
+
+- name: git-shipping
+  type: git
+  source:
+    branch: master
+    uri: https://github.com/dynatrace-sockshop/shipping.git
+
+- name: dynatrace
+  type: dynatrace-resource
+  source:
+    apitoken: ((apitoken))
+    tenanthost: ((tenanthost))
+
+- name: shipping-release-bucket
+  type: s3
+  source:
+    region_name: eu-west-1
+    versioned_file: shipping/shipping.jar
+    bucket: orders-release-bucket
+    access_key_id: ((s3-access-key-id))
+    secret_access_key: ((s3-secret-access-key))
+
+# PCF Environments
+
+- name: pcf-stage
+  type: cf
+  source:
+    api: ((pcf-stage-api))
+    username: ((pcf-stage-deploy-username))
+    password: ((pcf-stage-deploy-password))
+    organization: ((pcf-stage-organization))
+    space: ((pcf-stage-space))
+    skip_cert_check: false
+
+- name: pcf-production
+  type: cf
+  source:
+    api: ((pcf-prod-api))
+    username: ((pcf-prod-deploy-username))
+    password: ((pcf-prod-deploy-password))
+    organization: ((pcf-prod-organization))
+    space: ((pcf-prod-space))
+    skip_cert_check: false
+
+jobs:
+
+# Initialize Dynatrace Custom Device
+
+- name: init-dynatrace-shipping
+  public: true
+  plan:
+  - aggregate:
+    - get: git-pipeline
+    - get: git-shipping 
+  - task: init-dynatrace-task
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/init-dynatrace-task.yml
+    params: 
+      apitoken: ((apitoken))
+      tenanthost: ((tenanthost))
+      APP_REPO: git-shipping
+
+# SHIPPING
+
+- name: build-shipping
+  plan:
+  - get: git-shipping
+    trigger: true
+  - task: mvn-build
+    config:
+      platform: linux
+      image_resource:
+        type: docker-image
+        source: {repository: maven, tag: 3.2-jdk-8}
+      inputs:
+      - name: git-shipping
+      outputs:
+      - name: workspace
+      run:
+        path: /bin/sh
+        args:
+        - -exc
+        - |
+          output_dir=workspace
+          cd git-shipping
+          mvn -DskipTests package
+          cd ..
+          cp git-shipping/target/*.jar "${output_dir}/"
+  - put: shipping-release-bucket
+    params:
+      file: workspace/shipping.jar
+
+- name: deploy-shipping-to-stage
+  serial: true
+  public: true
+  plan:
+  - get: git-shipping
+    trigger: true
+    passed:
+      - build-shipping
+  - get: shipping-release-bucket
+    passed:
+      - build-shipping
+  - get: git-pipeline
+    trigger: false    
+  - task: prepare-app-manifest
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-stage-shipping-suffix)) 
+      DOCKER_HUB_ACCOUNT: ((docker-hub-username))
+      APP_REPO: git-shipping
+  - put: dynatrace
+    params:
+      monspecserviceenvironment: shipping/Staging
+      pipelinetaskname: deploy-shipping-to-stage
+      deployversion: v1.0
+      APP_REPO: git-shipping 
+  - put: pcf-stage
+    params:
+      path: shipping-release-bucket/shipping.jar
+      manifest: app-manifest-output/manifest.yml  
+  
+- name: health-check
+  serial: true
+  public: true
+  plan:
+  - aggregate:
+    - get: git-shipping
+      trigger: true
+      passed:
+        - deploy-shipping-to-stage
+    - get: git-jmeter-as-container
+    - get: git-pipeline
+  - task: run-load-tests
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/health-test.yml
+    params:
+      APP_REPO: git-jmeter-as-container
+      FUNC_VALIDATION: yes
+      PRODUCTION: false
+      SCRIPT_NAME: basiccheck.jmx
+      PCF_APP_SUFFIX: ((pcf-stage-shipping-suffix))
+      PCF_APP_DOMAIN: ((pcf-prod-app-domain))
+      DT_LTN: HealthCheck
+      VUCount: 1
+      LoopCount: 1
+
+- name: deploy-shipping-to-prod
+  serial: true
+  public: true
+  plan:
+  - get: git-shipping
+    trigger: true
+    passed:
+      - health-check
+  - get: shipping-release-bucket
+    passed:
+      - build-shipping
+  - get: git-pipeline
+    trigger: false
+  - task: get-current-app-color
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/current-app-get-info.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
+      PCF_API: ((pcf-prod-api))
+      PCF_ORG: ((pcf-prod-organization))
+      PCF_USER: ((pcf-prod-deploy-username))
+      PCF_PWD: ((pcf-prod-deploy-password))
+      PCF_SPACE: ((pcf-prod-space))              
+  - task: prepare-app-manifest
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix)) 
+      DOCKER_HUB_ACCOUNT: ((docker-hub-username))
+      APP_REPO: git-shipping
+      PRODUCTION: true       
+  - put: dynatrace
+    params:
+      monspecserviceenvironment: shipping/Production
+      pipelinetaskname: deploy-shipping-to-prod
+      deployversion: v1.0 
+      APP_REPO: git-shipping      
+  - put: pcf-production
+    params:
+      path: shipping-release-bucket/shipping.jar
+      manifest: app-manifest-output/manifest.yml 
+
+- name: execute-shipping-load-tests
+  serial: true
+  public: true
+  plan:
+  - aggregate:
+    - get: git-shipping
+      trigger: true
+      passed:
+        - deploy-shipping-to-prod
+    - get: git-pipeline
+      trigger: false        
+  - task: get-current-app-color
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/current-app-get-info.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
+      PCF_API: ((pcf-prod-api))
+      PCF_ORG: ((pcf-prod-organization))
+      PCF_USER: ((pcf-prod-deploy-username))
+      PCF_PWD: ((pcf-prod-deploy-password))
+      PCF_SPACE: ((pcf-prod-space))           
+  - task: run-load-tests
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/load-tests.yml
+    params:
+      APP_REPO: git-shipping
+      PRODUCTION: true
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
+      PCF_APP_DOMAIN: ((pcf-prod-app-domain))   
+  - task: push-dynatrace-monspec-data
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/push-dynatrace-monspec-data.yml
+    params: 
+      monspecserviceenvironment: shipping/Production-$NEXT_APP_COLOR
+      apitoken: ((apitoken))
+      tenanthost: ((tenanthost))
+      APP_REPO: git-shipping   
+
+- name: validate-shipping-load-test
+  serial: true
+  public: true
+  plan:
+  - get: git-shipping
+    trigger: true
+    passed:
+      - execute-shipping-load-tests
+  - get: git-pipeline
+    trigger: false      
+  - task: get-current-app-color
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/current-app-get-info.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
+      PCF_API: ((pcf-prod-api))
+      PCF_ORG: ((pcf-prod-organization))
+      PCF_USER: ((pcf-prod-deploy-username))
+      PCF_PWD: ((pcf-prod-deploy-password))
+      PCF_SPACE: ((pcf-prod-space))       
+  - task: validate-via-monspec
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/validate-via-monspec.yml
+    params: 
+      monspeccomparison: shipping/Production-$NEXT_APP_COLOR\ToProduction-$CURRENT_APP_COLOR\Last5m
+      apitoken: ((apitoken))
+      tenanthost: ((tenanthost))
+      APP_REPO: git-shipping     
+
+- name: promote-new-version-shipping
+  serial: true
+  public: true
+  plan:
+  - get: git-shipping
+    trigger: true
+    passed:
+      - validate-shipping-load-test
+  - get: git-pipeline
+    trigger: false      
+  - task: get-current-app-color
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/current-app-get-info.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
+      PCF_API: ((pcf-prod-api))
+      PCF_ORG: ((pcf-prod-organization))
+      PCF_USER: ((pcf-prod-deploy-username))
+      PCF_PWD: ((pcf-prod-deploy-password))
+      PCF_SPACE: ((pcf-prod-space))   
+  - task: switch-app-routes
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/update-routes.yml
+    params:
+      PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
+      PCF_API: ((pcf-prod-api))
+      PCF_ORG: ((pcf-prod-organization))
+      PCF_USER: ((pcf-prod-deploy-username))
+      PCF_PWD: ((pcf-prod-deploy-password))
+      PCF_SPACE: ((pcf-prod-space))
+      PCF_APP_DOMAIN: ((pcf-prod-app-domain))              
