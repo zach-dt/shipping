@@ -98,12 +98,12 @@ jobs:
   - aggregate:
     - get: git-pipeline
     - get: git-shipping
-#  - task: init-dynatrace-task
-#    file: git-pipeline/deploy/cloud-foundry/ci/tasks/init-dynatrace-task.yml
-#    params: 
-#      apitoken: ((apitoken))
-#      tenanthost: ((tenanthost))
-#      APP_REPO: git-shipping
+  - task: init-dynatrace-task
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/init-dynatrace-task.yml
+    params: 
+      apitoken: ((apitoken))
+      tenanthost: ((tenanthost))
+      APP_REPO: git-shipping
 
 # SHIPPING
 
@@ -129,12 +129,22 @@ jobs:
         args:
         - -exc
         - |
+          # Caching Maven
+          export ROOT_FOLDER=$( pwd )
+          M2_HOME="${HOME}/.m2"
+          M2_CACHE="${ROOT_FOLDER}/maven"
+          echo "Generating symbolic link for Maven cache"
+          ln -s "${M2_CACHE}" "${M2_HOME}"
+
+          # Build App
           output_dir=workspace
           cd git-shipping
           mvn -DskipTests package
           cd ..
           mv git-shipping/target/shipping.jar git-shipping/target/shipping-$(cat version/number).jar
           cp git-shipping/target/shipping-*.jar "${output_dir}/"
+      caches:
+        - path: maven
   - put: shipping-release-bucket
     params:
       file: workspace/shipping-*.jar
