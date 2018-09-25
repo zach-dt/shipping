@@ -23,6 +23,11 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.service.internalPort }}
+        resources:
+          limits:
+            memory: 1024Mi
+          requests:
+            memory: 512Mi
 #        livenessProbe:
 #          httpGet:
 #            path: {{ .Values.probePath }}
