@@ -23,11 +23,6 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         ports:
         - containerPort: {{ .Values.service.internalPort }}
-        resources:
-          limits:
-            memory: 2048Mi
-          requests:
-            memory: 1024Mi
 #        livenessProbe:
 #          httpGet:
 #            path: {{ .Values.probePath }}
@@ -44,5 +39,9 @@ spec:
 #          successThreshold: {{ .Values.readinessProbe.successThreshold }}
 #          timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
         resources:
+          limits:
+            memory: 2048Mi
+          requests:
+            memory: 1024Mi
 {{ toYaml .Values.resources | indent 12 }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
