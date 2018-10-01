@@ -330,7 +330,7 @@ jobs:
   - get: git-shipping
     trigger: true
     passed:
-      - validate-shipping-load-test
+      - execute-shipping-load-tests
   - get: version
     params: { bump: patch }
   - get: git-pipeline
