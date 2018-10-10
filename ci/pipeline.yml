@@ -26,19 +26,19 @@ resources:
   type: git
   source:
     branch: master
-    uri: https://github.com/dynatrace-sockshop/sockshop.git
+    uri: https://github.com/((workshop-repository))/sockshop.git
 
 - name: git-jmeter-as-container
   type: git
   source:
     branch: master
-    uri: https://github.com/dynatrace-sockshop/jmeter-as-container.git
+    uri: https://github.com/((workshop-repository))/jmeter-as-container.git
 
 - name: git-shipping
   type: git
   source:
     branch: master
-    uri: https://github.com/dynatrace-sockshop/shipping.git
+    uri: https://github.com/((workshop-repository))/shipping.git
 
 - name: dynatrace
   type: dynatrace-resource
@@ -50,10 +50,25 @@ resources:
   type: s3
   source:
     region_name: eu-west-1
-    versioned_file: shipping/shipping.jar
-    bucket: orders-release-bucket
+    regexp: shipping/shipping-(.*).jar
+    bucket: ((s3-bucket))
     access_key_id: ((s3-access-key-id))
     secret_access_key: ((s3-secret-access-key))
+
+- name: version
+  type: semver
+  source:
+#    driver: s3
+#    initial_version: 0.0.1
+#    region_name: eu-west-1
+#    bucket: ((s3-bucket))
+#    access_key_id: ((s3-access-key-id))
+#    secret_access_key: ((s3-secret-access-key))
+#    key: shipping/version
+    driver: git
+    uri: https://github.com/((workshop-repository))/shipping.git
+    branch: master
+    file: version
 
 # PCF Environments
 
@@ -86,7 +101,7 @@ jobs:
   plan:
   - aggregate:
     - get: git-pipeline
-    - get: git-shipping 
+    - get: git-shipping
   - task: init-dynatrace-task
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/init-dynatrace-task.yml
     params: 
@@ -100,6 +115,8 @@ jobs:
   plan:
   - get: git-shipping
     trigger: true
+  - get: version
+    params: { pre: rc }
   - task: mvn-build
     config:
       platform: linux
@@ -108,6 +125,7 @@ jobs:
         source: {repository: maven, tag: 3.2-jdk-8}
       inputs:
       - name: git-shipping
+      - name: version
       outputs:
       - name: workspace
       run:
@@ -115,14 +133,25 @@ jobs:
         args:
         - -exc
         - |
+          # Caching Maven
+          export ROOT_FOLDER=$( pwd )
+          M2_HOME="${HOME}/.m2"
+          M2_CACHE="${ROOT_FOLDER}/maven"
+          echo "Generating symbolic link for Maven cache"
+          ln -s "${M2_CACHE}" "${M2_HOME}"
+
+          # Build App
           output_dir=workspace
           cd git-shipping
           mvn -DskipTests package
           cd ..
-          cp git-shipping/target/*.jar "${output_dir}/"
+          mv git-shipping/target/shipping.jar git-shipping/target/shipping-$(cat version/number).jar
+          cp git-shipping/target/shipping-*.jar "${output_dir}/"
+      caches:
+        - path: maven
   - put: shipping-release-bucket
     params:
-      file: workspace/shipping.jar
+      file: workspace/shipping-*.jar
 
 - name: deploy-shipping-to-stage
   serial: true
@@ -141,7 +170,6 @@ jobs:
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
     params:
       PCF_APP_SUFFIX: ((pcf-stage-shipping-suffix)) 
-      DOCKER_HUB_ACCOUNT: ((docker-hub-username))
       APP_REPO: git-shipping
   - put: dynatrace
     params:
@@ -151,7 +179,7 @@ jobs:
       APP_REPO: git-shipping 
   - put: pcf-stage
     params:
-      path: shipping-release-bucket/shipping.jar
+      path: shipping-release-bucket/shipping-*.jar
       manifest: app-manifest-output/manifest.yml  
   
 - name: health-check
@@ -204,7 +232,6 @@ jobs:
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
     params:
       PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix)) 
-      DOCKER_HUB_ACCOUNT: ((docker-hub-username))
       APP_REPO: git-shipping
       PRODUCTION: true       
   - put: dynatrace
@@ -215,7 +242,7 @@ jobs:
       APP_REPO: git-shipping      
   - put: pcf-production
     params:
-      path: shipping-release-bucket/shipping.jar
+      path: shipping-release-bucket/shipping-*.jar
       manifest: app-manifest-output/manifest.yml 
 
 - name: execute-shipping-load-tests
@@ -227,6 +254,7 @@ jobs:
       trigger: true
       passed:
         - deploy-shipping-to-prod
+    - get: git-jmeter-as-container
     - get: git-pipeline
       trigger: false        
   - task: get-current-app-color
@@ -238,13 +266,18 @@ jobs:
       PCF_USER: ((pcf-prod-deploy-username))
       PCF_PWD: ((pcf-prod-deploy-password))
       PCF_SPACE: ((pcf-prod-space))           
-  - task: run-load-tests
+  - task: run-load-test
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/load-tests.yml
     params:
-      APP_REPO: git-shipping
+      APP_REPO: git-jmeter-as-container
+      FUNC_VALIDATION: yes
       PRODUCTION: true
+      SCRIPT_NAME: shipping_load.jmx
       PCF_APP_SUFFIX: ((pcf-prod-shipping-suffix))
-      PCF_APP_DOMAIN: ((pcf-prod-app-domain))   
+      PCF_APP_DOMAIN: ((pcf-prod-app-domain))
+      DT_LTN: LoadTest
+      VUCount: 5
+      LoopCount: 20    
   - task: push-dynatrace-monspec-data
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/push-dynatrace-monspec-data.yml
     params: 
@@ -288,6 +321,8 @@ jobs:
     trigger: true
     passed:
       - validate-shipping-load-test
+  - get: version
+    params: { bump: patch }
   - get: git-pipeline
     trigger: false      
   - task: get-current-app-color
@@ -309,3 +344,5 @@ jobs:
       PCF_PWD: ((pcf-prod-deploy-password))
       PCF_SPACE: ((pcf-prod-space))
       PCF_APP_DOMAIN: ((pcf-prod-app-domain))              
+#  - put: version
+#    params: { file: version/number }
