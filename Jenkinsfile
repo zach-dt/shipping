@@ -65,7 +65,7 @@ pipeline {
         }
       }
       steps {
-        sleep 30
+        sleep 90
 
         build job: "jmeter-tests",
           parameters: [
