@@ -1,14 +1,20 @@
-FROM openjdk:8-jdk-slim
-ENV PORT 8080
-ENV CLASSPATH /opt/lib
-EXPOSE 8080
+FROM openjdk:8-jdk
 
-# copy pom.xml and wildcards to avoid this command failing if there's no target/lib directory
-COPY pom.xml target/lib* /opt/lib/
+WORKDIR /usr/src/app
+COPY ./target/*.jar ./app.jar
 
-# NOTE we assume there's only 1 jar in the target dir
-# but at least this means we don't have to guess the name
-# we could do with a better way to know the name - or to always create an app.jar or something
-COPY target/*.jar /opt/app.jar
-WORKDIR /opt
-CMD ["java", "-jar", "app.jar"]
+ARG BUILD_DATE
+ARG BUILD_VERSION
+ARG COMMIT
+
+LABEL org.label-schema.vendor="Dynatrace" \
+  org.label-schema.build-date="${BUILD_DATE}" \
+  org.label-schema.version="${BUILD_VERSION}" \
+  org.label-schema.name="Sockshop: Shipping" \
+  org.label-schema.description="REST API for Shipping service" \
+  org.label-schema.url="https://github.com/dynatrace-sockshop/shipping" \
+  org.label-schema.vcs-url="github.com:microservices-demo/shipping.git" \
+  org.label-schema.vcs-ref="${COMMIT}" \
+  org.label-schema.schema-version="1.0"
+
+ENTRYPOINT ["java","-jar","./app.jar", "--port=8080"]
