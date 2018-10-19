@@ -9,6 +9,7 @@ groups:
   - execute-shipping-load-tests
   - validate-shipping-load-test
   - promote-new-version-shipping
+  - upload-shipping-git-release
 
 - name: init-dynatrace
   jobs: 
@@ -22,6 +23,15 @@ resource_types:
 
 resources:
 
+#GitHub Release Repository
+- name: shipping-release
+  type: github-release
+  source:
+    owner: acm-workshop-concourse
+    repository: shipping
+    access_token: ((github-access-token))
+
+# GitHub Repositories
 - name: git-pipeline
   type: git
   source:
@@ -116,7 +126,7 @@ jobs:
   - get: git-shipping
     trigger: true
   - get: version
-    params: { pre: rc }
+    params: { pre: build }
   - task: mvn-build
     config:
       platform: linux
@@ -193,7 +203,7 @@ jobs:
         - deploy-shipping-to-stage
     - get: git-jmeter-as-container
     - get: git-pipeline
-  - task: run-load-tests
+  - task: run-health-check
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/health-test.yml
     params:
       APP_REPO: git-jmeter-as-container
@@ -320,7 +330,7 @@ jobs:
   - get: git-shipping
     trigger: true
     passed:
-      - validate-shipping-load-test
+      - execute-shipping-load-tests
   - get: version
     params: { bump: patch }
   - get: git-pipeline
@@ -344,5 +354,28 @@ jobs:
       PCF_PWD: ((pcf-prod-deploy-password))
       PCF_SPACE: ((pcf-prod-space))
       PCF_APP_DOMAIN: ((pcf-prod-app-domain))              
+
+- name: upload-shipping-git-release
+  public: true
+  plan:
+  - aggregate:
+    - get: git-shipping
+      trigger: true
+      passed: 
+        - promote-new-version-shipping
+    - get: shipping-release-bucket
+    - get: git-pipeline
+    - get: version
+      params: { pre: build }
+  - task: create-shipping-release-info
+    file: git-pipeline/deploy/cloud-foundry/ci/tasks/prepare-release.yml
+    params:
+      APP_NAME: shipping
+  - put: shipping-release
+    params:
+      name: prepared-release/name
+      tag: prepared-release/tag
+      globs:
+      - shipping-release-bucket/shipping-*.jar
 #  - put: version
-#    params: { file: version/number }
+#    params: { file: version/number } 
