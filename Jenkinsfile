@@ -129,7 +129,7 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'git-credentials-acm', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
             sh "git config --global user.email ${env.GIT_USER_EMAIL}"
             sh "git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/dynatrace-sockshop/k8s-deploy-staging"
-            sh "cd k8s-deploy-staging/ && sed -i 's#image: .*#image: ${env.TAG_STAGING}#' shipping.yml && cat shipping.yml"
+            sh "cd k8s-deploy-staging/ && sed -i 's#image: .*#image: ${env.TAG_STAGING}#' shipping.yml"
             sh "cd k8s-deploy-staging/ && git add shipping.yml && git commit -m 'Update shipping version ${env.VERSION}'"
             sh 'cd k8s-deploy-staging/ && git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/dynatrace-sockshop/k8s-deploy-staging'
         }
