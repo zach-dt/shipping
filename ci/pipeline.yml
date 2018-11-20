@@ -17,11 +17,11 @@ groups:
   jobs: 
   - init-dynatrace-shipping
 
-# resource_types:
-# - name: dynatrace-resource
-#   type: docker-image
-#   source:
-#     repository: mvilliger/dynatrace-resource
+resource_types:
+- name: dynatrace-resource
+  type: docker-image
+  source:
+    repository: mvilliger/dynatrace-resource
 
 resources:
 
@@ -46,11 +46,11 @@ resources:
     branch: master
     uri: https://github.com/((workshop-repository))/shipping.git
 
-# - name: dynatrace
-#   type: dynatrace-resource
-#   source:
-#     apitoken: ((apitoken))
-#     tenanthost: ((tenanthost))
+- name: dynatrace
+  type: dynatrace-resource
+  source:
+    apitoken: ((dt_api_token))
+    tenanthost: ((dt_tenant_host))
 
 - name: shipping-release-bucket
   type: s3
@@ -178,11 +178,12 @@ jobs:
   - task: prepare-app-manifest
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
     params:
+      STAGE: Dev
       PCF_APP_SUFFIX: ((pcf-dev-shipping-suffix)) 
       APP_REPO: git-shipping           
   # - put: dynatrace
   #   params:
-  #     monspecserviceenvironment: shipping/dev
+  #     monspecserviceenvironment: shipping/Dev
   #     pipelinetaskname: deploy-to-dev
   #     deployversion: v1.0
   #     APP_REPO: git-shipping
@@ -263,14 +264,15 @@ jobs:
   - task: prepare-app-manifest
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
     params:
+      STAGE: Staging
       PCF_APP_SUFFIX: ((pcf-staging-shipping-suffix)) 
       APP_REPO: git-shipping               
-  # - put: dynatrace
-  #   params:
-  #     monspecserviceenvironment: shipping/Production
-  #     pipelinetaskname: deploy-to-prod
-  #     deployversion: v1.0 
-  #     APP_REPO: git-shipping 
+  - put: dynatrace
+    params:
+      monspecserviceenvironment: shipping/Staging
+      pipelinetaskname: deploy-to-staging
+      deployversion: v1.0 
+      APP_REPO: git-shipping 
   - put: pcf-staging
     params:
       path: shipping-release-bucket/shipping-*.jar
@@ -358,15 +360,15 @@ jobs:
   - task: prepare-app-manifest
     file: git-pipeline/deploy/cloud-foundry/ci/tasks/app-manifest-prep.yml
     params:
+      STAGE: Production 
       PCF_APP_SUFFIX: ((pcf-production-shipping-suffix)) 
-      APP_REPO: git-shipping
-      PRODUCTION: true                 
-  # - put: dynatrace
-  #   params:
-  #     monspecserviceenvironment: shipping/Production
-  #     pipelinetaskname: deploy-shipping-to-prod
-  #     deployversion: v1.0 
-  #     APP_REPO: git-shipping 
+      APP_REPO: git-shipping     
+  - put: dynatrace
+    params:
+      monspecserviceenvironment: shipping/Production
+      pipelinetaskname: deploy-to-production
+      deployversion: v1.0 
+      APP_REPO: git-shipping 
   - put: pcf-production
     params:
       path: shipping-release-bucket/shipping-*.jar
