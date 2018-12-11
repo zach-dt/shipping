@@ -78,7 +78,6 @@ pipeline {
         }
         steps {
           container("curl") {
-            // send custom deployment event to Dynatrace
             script {
               def status = pushDynatraceDeploymentEvent (
                 tagRule : tagMatchRules
